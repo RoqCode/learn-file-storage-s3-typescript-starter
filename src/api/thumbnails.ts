@@ -3,7 +3,9 @@ import { respondWithJSON } from "./json";
 import { getVideo, updateVideo } from "../db/videos";
 import type { ApiConfig } from "../config";
 import type { BunRequest } from "bun";
+import nodePath from "node:path";
 import { BadRequestError, UserForbiddenError } from "./errors";
+import { randomBytes } from "node:crypto";
 
 const MAX_UPLOAD_SIZE = 10 << 20; // 10 MB
 
@@ -20,20 +22,24 @@ export async function handlerUploadThumbnail(cfg: ApiConfig, req: BunRequest) {
 
   const formData = await req.formData();
   const file = formData.get("thumbnail");
-  if (!(file instanceof File)) {
+
+  if (!(file instanceof File))
     throw new BadRequestError("Thumbnail file missing");
-  }
-
-  if (file.size > MAX_UPLOAD_SIZE) {
+  if (file.size > MAX_UPLOAD_SIZE)
     throw new BadRequestError("Thumbnail file size is too big");
-  }
+  if (file.type !== "image/jpeg" && file.type !== "image/png")
+    throw new BadRequestError("Thumbnail file size is too big");
 
+  const ext = file.type.split("/").pop();
+  const video = getVideo(cfg.db, videoId);
+
+  const videoIdRnd = randomBytes(32).toString("base64");
+  const outPath = nodePath.join(cfg.assetsRoot, `${videoIdRnd}.${ext!}`);
   const arrBuffer = await file.arrayBuffer();
   const buffer = Buffer.from(arrBuffer);
-  const imageString = buffer.toString("base64");
-  const dataUrl = `data:${file.type};base64,${imageString}`;
+  await Bun.write(outPath, buffer);
 
-  const video = getVideo(cfg.db, videoId);
+  const thumbnailUrl = `http://localhost:${cfg.port}/assets/${videoIdRnd}.${ext}`;
 
   if (userID !== video?.userID) {
     throw new UserForbiddenError("User is not owner");
@@ -42,7 +48,7 @@ export async function handlerUploadThumbnail(cfg: ApiConfig, req: BunRequest) {
   try {
     updateVideo(cfg.db, {
       ...video,
-      thumbnailURL: dataUrl,
+      thumbnailURL: thumbnailUrl,
     });
   } catch (e) {
     console.error(`error while updatding video meta data:`, e);
