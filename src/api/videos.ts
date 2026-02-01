@@ -9,6 +9,7 @@ import { type ApiConfig } from "../config";
 import { getVideo, updateVideo } from "../db/videos";
 import { BadRequestError, UserForbiddenError } from "./errors";
 import { getVideoAspectRatio, type Ratio } from "../utils/getVideoAspectRatio";
+import { processVideoForFastStart } from "../utils/processVideoForFastStart";
 
 const MAX_UPLOAD_SIZE = 1 << 30; // 1 GB probably?
 
@@ -51,12 +52,13 @@ export async function handlerUploadVideo(cfg: ApiConfig, req: BunRequest) {
 
   const ratio: Ratio = await getVideoAspectRatio(outPath);
   const filePath = `${ratio}/${videoIdRnd}.${ext!}`;
+  const filePathProc = await processVideoForFastStart(outPath);
 
   try {
     const s3File = cfg.s3Client.file(filePath, {
       type: file.type,
     });
-    await s3File.write(Bun.file(outPath));
+    await s3File.write(Bun.file(filePathProc));
   } catch (e) {
     console.error(`error during s3 upload!`);
     throw e;
@@ -75,6 +77,7 @@ export async function handlerUploadVideo(cfg: ApiConfig, req: BunRequest) {
   }
 
   Bun.file(outPath).delete();
+  Bun.file(filePathProc).delete();
 
   return respondWithJSON(200, { videoURL });
 }
