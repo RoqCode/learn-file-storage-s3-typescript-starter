@@ -1,7 +1,6 @@
 import { respondWithJSON } from "./json";
 
 import { type BunRequest } from "bun";
-import { randomBytes } from "node:crypto";
 import nodePath from "node:path";
 import * as uuid from "uuid";
 import { getBearerToken, validateJWT } from "../auth";
@@ -10,6 +9,7 @@ import { getVideo, updateVideo } from "../db/videos";
 import { BadRequestError, UserForbiddenError } from "./errors";
 import { getVideoAspectRatio, type Ratio } from "../utils/getVideoAspectRatio";
 import { processVideoForFastStart } from "../utils/processVideoForFastStart";
+import { dbVideoToSignedVideo } from "../utils/dbVideoToSignedVideo";
 
 const MAX_UPLOAD_SIZE = 1 << 30; // 1 GB probably?
 
@@ -34,11 +34,13 @@ export async function handlerUploadVideo(cfg: ApiConfig, req: BunRequest) {
     throw new BadRequestError("Thumbnail file size is too big");
   if (file.type !== "video/mp4") throw new BadRequestError("Wrong file type");
 
-  const videoIdRnd = randomBytes(32).toString("base64url");
+  const videoType = file.name.split("-").pop()?.split(".").shift();
+  if (!videoType) throw new BadRequestError("malformed file name");
+
   const ext = file.type.split("/").pop();
   const outPath = nodePath.join(
     `/tmp/tubely_temp_assets/`,
-    `${videoIdRnd}.${ext!}`,
+    `${videoType}.${ext!}`,
   );
 
   try {
@@ -51,11 +53,12 @@ export async function handlerUploadVideo(cfg: ApiConfig, req: BunRequest) {
   }
 
   const ratio: Ratio = await getVideoAspectRatio(outPath);
-  const filePath = `${ratio}/${videoIdRnd}.${ext!}`;
+  const fileKey = `${ratio}/${videoType}.${ext!}`;
+
   const filePathProc = await processVideoForFastStart(outPath);
 
   try {
-    const s3File = cfg.s3Client.file(filePath, {
+    const s3File = cfg.s3Client.file(fileKey, {
       type: file.type,
     });
     await s3File.write(Bun.file(filePathProc));
@@ -64,20 +67,22 @@ export async function handlerUploadVideo(cfg: ApiConfig, req: BunRequest) {
     throw e;
   }
 
-  const videoURL = `https://${cfg.s3Bucket}.s3.${cfg.s3Region}.amazonaws.com/${filePath}`;
-
+  const updatedVideo = {
+    ...video,
+    videoURL: fileKey,
+  };
   try {
     updateVideo(cfg.db, {
-      ...video,
-      videoURL,
+      ...updatedVideo,
     });
+
+    const signedVideo = dbVideoToSignedVideo(cfg, updatedVideo);
+    return respondWithJSON(200, signedVideo);
   } catch (e) {
     console.error(`error while updatding video meta data:`, e);
     throw e;
+  } finally {
+    Bun.file(outPath).delete();
+    Bun.file(filePathProc).delete();
   }
-
-  Bun.file(outPath).delete();
-  Bun.file(filePathProc).delete();
-
-  return respondWithJSON(200, { videoURL });
 }
