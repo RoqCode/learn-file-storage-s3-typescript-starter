@@ -33,7 +33,7 @@ export async function handlerUploadThumbnail(cfg: ApiConfig, req: BunRequest) {
   const ext = file.type.split("/").pop();
   const video = getVideo(cfg.db, videoId);
 
-  const videoIdRnd = randomBytes(32).toString("base64");
+  const videoIdRnd = randomBytes(32).toString("base64url");
   const outPath = nodePath.join(cfg.assetsRoot, `${videoIdRnd}.${ext!}`);
   const arrBuffer = await file.arrayBuffer();
   const buffer = Buffer.from(arrBuffer);
