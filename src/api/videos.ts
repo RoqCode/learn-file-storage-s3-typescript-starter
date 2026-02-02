@@ -9,7 +9,6 @@ import { getVideo, updateVideo } from "../db/videos";
 import { BadRequestError, UserForbiddenError } from "./errors";
 import { getVideoAspectRatio, type Ratio } from "../utils/getVideoAspectRatio";
 import { processVideoForFastStart } from "../utils/processVideoForFastStart";
-import { dbVideoToSignedVideo } from "../utils/dbVideoToSignedVideo";
 
 const MAX_UPLOAD_SIZE = 1 << 30; // 1 GB probably?
 
@@ -67,17 +66,18 @@ export async function handlerUploadVideo(cfg: ApiConfig, req: BunRequest) {
     throw e;
   }
 
+  const videoURL = `https://${cfg.s3CfDistribution}/${fileKey}`;
+
   const updatedVideo = {
     ...video,
-    videoURL: fileKey,
+    videoURL,
   };
   try {
     updateVideo(cfg.db, {
       ...updatedVideo,
     });
 
-    const signedVideo = dbVideoToSignedVideo(cfg, updatedVideo);
-    return respondWithJSON(200, signedVideo);
+    return respondWithJSON(200, updatedVideo);
   } catch (e) {
     console.error(`error while updatding video meta data:`, e);
     throw e;
